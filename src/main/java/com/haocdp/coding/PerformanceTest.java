@@ -1,3 +1,5 @@
+package com.haocdp.coding;
+
 public class PerformanceTest {
 
     public static void main(String[] args){

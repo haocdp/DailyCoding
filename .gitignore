@@ -24,3 +24,9 @@ hs_err_pid*
 .git
 .idea
 out
+target
+
+.DS_Store
+# src/main/resources/
+# src/test/
+target/
