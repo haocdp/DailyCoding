@@ -30,3 +30,5 @@ target
 # src/main/resources/
 # src/test/
 target/
+
+*.iml
