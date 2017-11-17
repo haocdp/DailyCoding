@@ -15,7 +15,7 @@ public class PathException extends Exception {
     }
 
     public PathException(Throwable cause) {
-        super(cause);
+        super(cause );
     }
 
 }
