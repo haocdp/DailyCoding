@@ -67,7 +67,8 @@ public class CSVHandler {
              */
             new Thread(() -> {
                 try {
-                    CSVFormatTime.handle(this.inputDir.getText(), this.outputDir.getText());
+                    if (CSVFormatTime.handle(this.inputDir.getText(), this.outputDir.getText()))
+                        System.exit(0);
                 } catch (IOException ioe) {
                     JOptionPane.showMessageDialog(this.MainPanel, ioe.getMessage());
                 } catch (ParseException pse) {
