@@ -14,6 +14,19 @@ import java.util.concurrent.Executors;
 
 public class CSVFormatTime{
 
+
+    private static final String[] HEADERS = {"car_number",
+            "datetime_record",
+            "longitude",
+            "latitude",
+            "speed",
+            "direction",
+            "status",
+            "rn",
+            "n_longitude",
+            "n_latitude",
+            "time_format"};
+
     /**
      * 将数字时间转为标准格式
      * 标准格式：HH:mm:ss
@@ -30,6 +43,7 @@ public class CSVFormatTime{
 
     /**
      * 将源目录下的所有csv文件时间进行格式化
+     * 仅仅将时间进行格式化放到最后一列上
      * @param srcDirectory
      * @param destDirectory
      */
@@ -76,6 +90,101 @@ public class CSVFormatTime{
                         record = Arrays.copyOf(record, record.length + 1);
                         record[record.length - 1] = record[1].split(" ")[1];
                         writer.writeRecord(record);
+                        writer.flush();
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } finally {
+                    if (reader != null)
+                        reader.close();
+                    if (writer != null)
+                        writer.close();
+                }
+
+
+            });
+
+        }
+
+        executorService.shutdown();
+
+        /**
+         * 确保任务执行完成后，主线程才往下执行
+         */
+        while (true) {
+            if (executorService.isTerminated())
+                break;
+            Thread.sleep(1000);
+        }
+
+    }
+
+    /**
+     * 将源目录下的所有csv文件时间进行格式化
+     * 把下一条记录中坐标添加其中
+     * @param srcDirectory
+     * @param destDirectory
+     */
+    private static void formatter_new(String srcDirectory, String destDirectory)
+            throws IOException ,PathException, InterruptedException{
+        File carTrajectoryDir = new File(destDirectory);
+        if (!carTrajectoryDir.exists())
+            carTrajectoryDir.mkdirs();
+
+        File srcFD = new File(srcDirectory);
+
+        if (!srcFD.exists()) {
+            throw new PathException("输出目录不存在");
+//            System.out.println("源目录不存在");
+        }
+
+        File[] srcFiles = srcFD.listFiles();
+
+        ExecutorService executorService = Executors.newFixedThreadPool(5);
+
+        for (File srcFile : srcFiles) {
+
+            executorService.execute(() -> {
+                CsvReader reader = null;
+                CsvWriter writer = null;
+                String[] record = null;
+                String[] preRecord = null;
+
+                try {
+                    reader = new CsvReader(srcFile.getAbsolutePath(), ',');
+                    if (reader.readRecord())
+                        reader.getValues();
+                    else
+                        return;
+
+                    writer = new CsvWriter(
+                            destDirectory + "/" + srcFile.getName());
+                    writer.writeRecord(HEADERS);
+
+                    while (reader.readRecord()) {
+                        record = reader.getValues();
+
+                        if (preRecord == null) {
+                            preRecord = record;
+                            continue;
+                        }
+
+                        preRecord = Arrays.copyOf(preRecord, preRecord.length + 3);
+                        preRecord[preRecord.length - 3] = record[2];
+                        preRecord[preRecord.length - 2] = record[3];
+                        preRecord[preRecord.length - 1] = record[1].split(" ")[1];
+                        writer.writeRecord(preRecord);
+                        writer.flush();
+
+                        preRecord = record;
+                    }
+
+                    if (preRecord != null) {
+                        preRecord = Arrays.copyOf(preRecord, preRecord.length + 3);
+                        preRecord[preRecord.length - 3] = record[2];
+                        preRecord[preRecord.length - 2] = record[3];
+                        preRecord[preRecord.length - 1] = record[1].split(" ")[1];
+                        writer.writeRecord(preRecord);
                         writer.flush();
                     }
                 } catch (IOException e) {
@@ -243,18 +352,6 @@ public class CSVFormatTime{
 
         ExecutorService executorService = Executors.newFixedThreadPool(5);
 
-        String[] headers = {
-                "car_number",
-                "datetime_record",
-                "longitude",
-                "latitude",
-                "speed",
-                "direction",
-                "status",
-                "rn",
-                "time_format"};
-
-
         for (File srcFile : srcFiles) {
             if (!srcFile.getName().contains(".csv"))
                 continue;
@@ -404,6 +501,124 @@ public class CSVFormatTime{
             }
             reader.close();
 
+        }
+    }
+
+    /**
+     * 将文件按照5分钟间隔进行压缩
+     * 把下一条记录中坐标添加其中
+     * @param srcDirectory
+     * @param destDirectory
+     */
+    public static void compressWith5Minute_new(
+            String srcDirectory,
+            String destDirectory)
+            throws IOException, ParseException, PathException, InterruptedException{
+
+        ThreadLocal<SimpleDateFormat> threadSafeSdf =
+                ThreadLocal.withInitial(
+                        () -> new SimpleDateFormat("HH:mm:ss")
+                );
+
+        File srcFD = new File(srcDirectory);
+        File destDir = new File(destDirectory);
+
+        if (!destDir.exists())
+            destDir.mkdirs();
+
+        if (!srcFD.exists()) {
+            throw new PathException("输出目录不存在");
+//            System.out.println("源目录不存在");
+//            return;
+        }
+
+        ExecutorService executorService = Executors.newFixedThreadPool(5);
+
+        File[] srcFiles = srcFD.listFiles();
+
+        for (File srcFile : srcFiles) {
+            if (!srcFile.getName().contains(".csv"))
+                continue;
+
+            executorService.execute(() -> {
+                CsvWriter writer = null;
+                CsvReader reader = null;
+                String[] record = null;
+                String[] preRecord = null;
+
+                try {
+                    reader = new CsvReader(srcFile.getAbsolutePath(), ',');
+                    if (reader.readRecord())
+                        reader.getValues();
+                    else
+                        return;
+
+                    writer = new CsvWriter(destDirectory + "/" + srcFile.getName());
+                    writer.writeRecord(HEADERS);
+
+                    Date firstDate = null;
+
+                    while (reader.readRecord()) {
+                        record = reader.getValues();
+
+                        if (preRecord == null) {
+                            preRecord = record;
+                            firstDate = threadSafeSdf.get().parse(record[record.length - 1]);
+                            continue;
+                        }
+
+                        if ((threadSafeSdf.get().parse(
+                                record[record.length - 1]).getTime() -
+                                firstDate.getTime()) /
+                                (1000 * 60) < 5) {
+                            continue;
+                        }
+
+                        preRecord = Arrays.copyOf(preRecord, preRecord.length + 2);
+                        preRecord[preRecord.length - 1] = preRecord[record.length - 1];
+                        preRecord[preRecord.length - 3] = record[2];
+                        preRecord[preRecord.length - 2] = record[3];
+                        writer.writeRecord(preRecord);
+                        writer.flush();
+
+                        preRecord = record;
+                        firstDate = threadSafeSdf.get().parse(record[record.length - 1]);
+                    }
+
+                    if (preRecord != null) {
+                        preRecord = Arrays.copyOf(preRecord, preRecord.length + 2);
+                        preRecord[preRecord.length - 1] = record[record.length - 1];
+                        preRecord[preRecord.length - 3] = record[2];
+                        preRecord[preRecord.length - 2] = record[3];
+                        writer.writeRecord(preRecord);
+                        writer.flush();
+                    }
+                    }catch (IOException e){
+                        e.printStackTrace();
+                    } catch (ParseException pe) {
+                        pe.printStackTrace();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    } finally {
+                        if (writer != null) {
+                            writer.close();
+                        }
+                        if (reader != null) {
+                            reader.close();
+                        }
+                    }
+            });
+        }
+
+        executorService.shutdown();
+
+        /**
+         * 确保任务执行完成后，主线程才往下执行
+         */
+        while (true) {
+            if (executorService.isTerminated())
+                break;
+            Thread.sleep(1000);
         }
     }
 
@@ -576,20 +791,10 @@ public class CSVFormatTime{
 
         CsvReader reader;
         CsvWriter writer = null;
-        String[] headers = {
-                "car_number",
-                "datetime_record",
-                "longitude",
-                "latitude",
-                "speed",
-                "direction",
-                "status",
-                "rn",
-                "time_format"};
         String[] record;
 
         writer = new CsvWriter(destDirectory + "/" +srcDir.getName() + ".csv" );
-        writer.writeRecord(headers);
+        writer.writeRecord(HEADERS);
         writer.flush();
 
         for (File srcFile : srcFiles) {
@@ -734,16 +939,6 @@ public class CSVFormatTime{
         if (!file.isDirectory())
             file.mkdir();
 
-        String[] headers = {
-                "car_number",
-                "datetime_record",
-                "longitude",
-                "latitude",
-                "speed",
-                "direction",
-                "status",
-                "rn",
-                "time_format"};
         /**
          * 新建12个写入
          */
@@ -754,7 +949,7 @@ public class CSVFormatTime{
                     file.getAbsolutePath() + "\\" +
                             srcFile.getName().split("[.]")[0] +
                             "_" + i + ".csv");
-            csvWriter.writeRecord(headers); //把头标题写入
+            csvWriter.writeRecord(HEADERS); //把头标题写入
             writers[i] = csvWriter;
         }
 
@@ -791,62 +986,34 @@ public class CSVFormatTime{
             throws IOException, ParseException,
             InterruptedException, PathException{
 
-        String srcDirectory = args[0];
-        String destDirectory = args[1];
-
-
-        formatter(
-                srcDirectory,
-                destDirectory + "/carTrajectory"
-        );
-
-        compressWith2thRule(
-                destDirectory + "/carTrajectory",
-                destDirectory + "carTrajectory_compress_5m_filter0speed"
-        );
-
-        divideByHour(
-                destDirectory + "carTrajectory_compress_5m_filter0speed",
-                destDirectory + "carTrajectoryByHour_compress_5m_filter0speed"
-        );
-
-        Integrate2OneFileWithDirectory(
-                destDirectory + "carTrajectoryByHour_compress_5m_filter0speed",
-                destDirectory + "carTrajectoryByHour_compress_5m_filter0speed"
-        );
-
-        divideOneHour2FiveMinutesOneFile(
-                destDirectory + "carTrajectoryByHour_compress_5m_filter0speed",
-                destDirectory + "carTrajectoryByHour_compress_5m_filter0speed"
-        );
-
-//        divideByHourToOneFile(
-//                "F:\\carData\\carTrajectoryByHour_compress_5m\\00",
-//                "F:\\carData\\carTrajectoryByHour_compress_5m"
-////                args[0],
-////                args[1]
+//        String srcDirectory = args[0];
+//        String destDirectory = args[1];
+//
+//
+//        formatter(
+//                srcDirectory,
+//                destDirectory + "/carTrajectory"
 //        );
-
-
+//
+//        compressWith2thRule(
+//                destDirectory + "/carTrajectory",
+//                destDirectory + "carTrajectory_compress_5m_filter0speed"
+//        );
+//
+//        divideByHour(
+//                destDirectory + "carTrajectory_compress_5m_filter0speed",
+//                destDirectory + "carTrajectoryByHour_compress_5m_filter0speed"
+//        );
 //
 //        Integrate2OneFileWithDirectory(
-//                "F:\\carData\\carTrajectoryByHour_compress_5m",
-//                "F:\\carData\\carTrajectoryByHour_compress_5m"
-////                args[0],
-////                args[1]
+//                destDirectory + "carTrajectoryByHour_compress_5m_filter0speed",
+//                destDirectory + "carTrajectoryByHour_compress_5m_filter0speed"
 //        );
-
-//        compressWith5Minute(
-//                "F:\\carData\\carTrajectory",
-//                "F:\\carData\\carTrajectory_compress_5m"
+//
+//        divideOneHour2FiveMinutesOneFile(
+//                destDirectory + "carTrajectoryByHour_compress_5m_filter0speed",
+//                destDirectory + "carTrajectoryByHour_compress_5m_filter0speed"
 //        );
-
-
-
-//        Integrate2OneFile(
-//                "F:\\\\carData\\\\carTrajectory_compress_5m",
-//                "F:\\\\carData\\\\carTrajectory_compress_5m");
-
 
     }
 
@@ -857,7 +1024,7 @@ public class CSVFormatTime{
                 destDirectory + "/carTrajectory"
         );
 
-        compressWith2thRule(
+        compressWith5Minute_new(
                 destDirectory + "/carTrajectory",
                 destDirectory + "/carTrajectory_compress_5m_filter0speed"
         );
